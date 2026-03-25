@@ -2,15 +2,10 @@ package com.hyperchat.app.ui.navigation
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Photo
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -23,14 +18,56 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.hyperchat.app.ui.screens.*
 
-sealed class Screen(val route: String, val title: String, val icon: ImageVector) {
-    data object Home : Screen("home", "首页", Icons.Default.Home)
-    data object Chat : Screen("chat?conversationId={conversationId}", "聊天辅助", Icons.Default.Chat)
-    data object Screenshot : Screen("screenshot", "截图分析", Icons.Default.Photo)
-    data object Review : Screen("review", "聊天复盘", Icons.Default.Refresh)
-    data object Profile : Screen("profile", "我的", Icons.Default.Person)
-    data object Settings : Screen("settings", "设置", Icons.Default.Settings)
-    data object NewConversation : Screen("new_conversation", "新建会话", Icons.Default.Chat)
+sealed class Screen(
+    val route: String,
+    val title: String,
+    val selectedIcon: ImageVector,
+    val unselectedIcon: ImageVector
+) {
+    data object Home : Screen(
+        "home",
+        "首页",
+        Icons.Filled.Home,
+        Icons.Outlined.Home
+    )
+    data object Chat : Screen(
+        "chat/{conversationId}",
+        "聊天",
+        Icons.Filled.Chat,
+        Icons.Outlined.Chat
+    ) {
+        fun createRoute(conversationId: Long = -1L) = "chat/$conversationId"
+    }
+    data object Screenshot : Screen(
+        "screenshot",
+        "截图",
+        Icons.Filled.PhotoCamera,
+        Icons.Outlined.PhotoCamera
+    )
+    data object Review : Screen(
+        "review",
+        "复盘",
+        Icons.Filled.Analytics,
+        Icons.Outlined.Analytics
+    )
+    data object Profile : Screen(
+        "profile",
+        "情商库",
+        Icons.Filled.AutoStories,
+        Icons.Outlined.AutoStories
+    )
+    data object Settings : Screen(
+        "settings",
+        "设置",
+        Icons.Filled.Settings,
+        Icons.Outlined.Settings
+    )
+    data object NewConversation : Screen(
+        "new_conversation",
+        "新建会话",
+        Icons.Filled.Add,
+        Icons.Outlined.Add
+    )
 }
 
 val bottomNavItems = listOf(
@@ -45,33 +82,50 @@ val bottomNavItems = listOf(
 @Composable
 fun HyperChatNavHost() {
     val navController = rememberNavController()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentDestination = navBackStackEntry?.destination
+
+    // Determine if we should show bottom bar
+    val showBottomBar = bottomNavItems.any { screen ->
+        currentDestination?.hierarchy?.any { it.route == screen.route } == true ||
+        currentDestination?.route?.startsWith(screen.route.substringBefore("/")) == true
+    }
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
-                val navBackStackEntry by navController.currentBackStackEntryAsState()
-                val currentDestination = navBackStackEntry?.destination
+            if (showBottomBar) {
+                NavigationBar {
+                    bottomNavItems.forEach { screen ->
+                        val selected = currentDestination?.hierarchy?.any {
+                            it.route == screen.route ||
+                            (screen == Screen.Chat && it.route?.startsWith("chat/") == true)
+                        } == true
 
-                bottomNavItems.forEach { screen ->
-                    NavigationBarItem(
-                        icon = { Icon(screen.icon, contentDescription = screen.title) },
-                        label = { Text(screen.title) },
-                        selected = currentDestination?.hierarchy?.any {
-                            it.route?.startsWith(screen.route.substringBefore("?")) == true
-                        } == true,
-                        onClick = {
-                            navController.navigate(
-                                if (screen == Screen.Chat) "chat?conversationId=-1"
-                                else screen.route
-                            ) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+                        NavigationBarItem(
+                            icon = {
+                                Icon(
+                                    imageVector = if (selected) screen.selectedIcon else screen.unselectedIcon,
+                                    contentDescription = screen.title
+                                )
+                            },
+                            label = { Text(screen.title) },
+                            selected = selected,
+                            onClick = {
+                                val route = when (screen) {
+                                    Screen.Chat -> Screen.Chat.createRoute(-1L)
+                                    else -> screen.route
                                 }
-                                launchSingleTop = true
-                                restoreState = true
+
+                                navController.navigate(route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
@@ -81,10 +135,11 @@ fun HyperChatNavHost() {
             startDestination = Screen.Home.route,
             modifier = Modifier.padding(innerPadding)
         ) {
+            // Home Screen
             composable(Screen.Home.route) {
                 HomeScreen(
                     onStartChat = { conversationId ->
-                        navController.navigate("chat?conversationId=$conversationId")
+                        navController.navigate(Screen.Chat.createRoute(conversationId))
                     },
                     onAnalyzeScreenshot = {
                         navController.navigate(Screen.Screenshot.route)
@@ -95,8 +150,9 @@ fun HyperChatNavHost() {
                 )
             }
 
+            // Chat Screen
             composable(
-                route = "chat?conversationId={conversationId}",
+                route = Screen.Chat.route,
                 arguments = listOf(
                     navArgument("conversationId") {
                         type = NavType.LongType
@@ -105,38 +161,50 @@ fun HyperChatNavHost() {
                 )
             ) { backStackEntry ->
                 val conversationId = backStackEntry.arguments?.getLong("conversationId") ?: -1L
-                ChatScreen(
-                    conversationId = conversationId,
+
+                if (conversationId == -1L) {
+                    // Show new conversation screen first
+                    NewConversationScreen(
+                        onConversationCreated = { newConversationId ->
+                            navController.navigate(Screen.Chat.createRoute(newConversationId)) {
+                                popUpTo(Screen.Home.route)
+                            }
+                        }
+                    )
+                } else {
+                    ChatScreen(
+                        conversationId = conversationId,
+                        onBack = { navController.popBackStack() }
+                    )
+                }
+            }
+
+            // Screenshot Screen
+            composable(Screen.Screenshot.route) {
+                ScreenshotScreen(
                     onBack = { navController.popBackStack() }
                 )
             }
 
-            composable(Screen.Screenshot.route) {
-                ScreenshotScreen(onBack = { navController.popBackStack() })
-            }
-
+            // Review Screen
             composable(Screen.Review.route) {
-                ReviewScreen(onBack = { navController.popBackStack() })
-            }
-
-            composable(Screen.Profile.route) {
-                ProfileScreen(
-                    onBack = { navController.popBackStack() },
-                    onSettingsClick = { navController.navigate("settings") }
+                ReviewScreen(
+                    onBack = { navController.popBackStack() }
                 )
             }
 
-            composable("settings") {
-                SettingsScreen(onBack = { navController.popBackStack() })
+            // Profile/EQ Library Screen
+            composable(Screen.Profile.route) {
+                ProfileScreen(
+                    onBack = { navController.popBackStack() },
+                    onSettingsClick = { navController.navigate(Screen.Settings.route) }
+                )
             }
 
-            composable("new_conversation") {
-                NewConversationScreen(
-                    onConversationCreated = { conversationId ->
-                        navController.navigate("chat?conversationId=$conversationId") {
-                            popUpTo(Screen.Home.route)
-                        }
-                    }
+            // Settings Screen
+            composable(Screen.Settings.route) {
+                SettingsScreen(
+                    onBack = { navController.popBackStack() }
                 )
             }
         }
